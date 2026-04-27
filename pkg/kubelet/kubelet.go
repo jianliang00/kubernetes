@@ -275,6 +275,13 @@ var (
 	goos = sysruntime.GOOS
 )
 
+func configureContainerLogsDir(rootDirectory string) {
+	if goos == "darwin" && ContainerLogsDir == DefaultContainerLogsDir {
+		ContainerLogsDir = filepath.Join(rootDirectory, "logs", "containers")
+	}
+	kuberuntime.SetLegacyContainerLogsDir(ContainerLogsDir)
+}
+
 func getContainerEtcHostsPath() string {
 	if goos == "windows" {
 		return windowsEtcHostsPath
@@ -457,6 +464,7 @@ func NewMainKubelet(ctx context.Context,
 	if podLogsDirectory == "" {
 		return nil, errors.New("pod logs root directory is empty")
 	}
+	configureContainerLogsDir(rootDirectory)
 	if kubeCfg.SyncFrequency.Duration <= 0 {
 		return nil, fmt.Errorf("invalid sync frequency %d", kubeCfg.SyncFrequency.Duration)
 	}
