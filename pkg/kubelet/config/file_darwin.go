@@ -1,4 +1,5 @@
 //go:build darwin
+// +build darwin
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -26,11 +27,12 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/flowcontrol"
+	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 )
 
 const (
@@ -46,7 +48,7 @@ func (e *retryableError) Error() string {
 	return e.message
 }
 
-func (s *sourceFile) startWatch(logger klog.Logger) {
+func (s *sourceFile) startWatch() {
 	backOff := flowcontrol.NewBackOff(retryPeriod, maxRetryPeriod)
 	backOffID := "watch"
 
@@ -55,8 +57,8 @@ func (s *sourceFile) startWatch(logger klog.Logger) {
 			return
 		}
 
-		if err := s.doWatch(logger); err != nil {
-			logger.Error(err, "Unable to read config path", "path", s.path)
+		if err := s.doWatch(); err != nil {
+			klog.ErrorS(err, "Unable to read config path", "path", s.path)
 			if _, retryable := err.(*retryableError); !retryable {
 				backOff.Next(backOffID, time.Now())
 			}
@@ -64,14 +66,14 @@ func (s *sourceFile) startWatch(logger klog.Logger) {
 	}, retryPeriod)
 }
 
-func (s *sourceFile) doWatch(logger klog.Logger) error {
+func (s *sourceFile) doWatch() error {
 	_, err := os.Stat(s.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
 		// Emit an update with an empty PodList to allow FileSource to be marked as seen
-		s.updates <- sourceUpdate{Pods: []*v1.Pod{}}
+		s.updates <- kubetypes.PodUpdate{Pods: []*v1.Pod{}, Op: kubetypes.SET, Source: kubetypes.FileSource}
 		return &retryableError{"path does not exist, ignoring"}
 	}
 
@@ -89,7 +91,7 @@ func (s *sourceFile) doWatch(logger klog.Logger) error {
 	for {
 		select {
 		case event := <-w.Events:
-			if err = s.produceWatchEvent(logger, &event); err != nil {
+			if err = s.produceWatchEvent(&event); err != nil {
 				return fmt.Errorf("error while processing fsnotify event (%+v): %v", event, err)
 			}
 		case err = <-w.Errors:
@@ -98,10 +100,10 @@ func (s *sourceFile) doWatch(logger klog.Logger) error {
 	}
 }
 
-func (s *sourceFile) produceWatchEvent(logger klog.Logger, e *fsnotify.Event) error {
+func (s *sourceFile) produceWatchEvent(e *fsnotify.Event) error {
 	// Ignore file start with dots
 	if strings.HasPrefix(filepath.Base(e.Name), ".") {
-		logger.V(4).Info("Ignored pod manifest, because it starts with dots", "eventName", e.Name)
+		klog.V(4).InfoS("Ignored pod manifest, because it starts with dots", "eventName", e.Name)
 		return nil
 	}
 	var eventType podEventType
@@ -125,10 +127,10 @@ func (s *sourceFile) produceWatchEvent(logger klog.Logger, e *fsnotify.Event) er
 	return nil
 }
 
-func (s *sourceFile) consumeWatchEvent(logger klog.Logger, e *watchEvent) error {
+func (s *sourceFile) consumeWatchEvent(e *watchEvent) error {
 	switch e.eventType {
 	case podAdd, podModify:
-		pod, err := s.extractFromFile(logger, e.fileName)
+		pod, err := s.extractFromFile(e.fileName)
 		if err != nil {
 			return fmt.Errorf("can't process config file %q: %v", e.fileName, err)
 		}

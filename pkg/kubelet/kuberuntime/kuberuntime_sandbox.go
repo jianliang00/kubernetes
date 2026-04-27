@@ -136,11 +136,13 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		podSandboxConfig.PortMappings = portMappings
 	}
 
-	lc, err := m.generatePodSandboxLinuxConfig(pod)
-	if err != nil {
-		return nil, err
+	if runtime.GOOS != "darwin" {
+		lc, err := m.generatePodSandboxLinuxConfig(pod)
+		if err != nil {
+			return nil, err
+		}
+		podSandboxConfig.Linux = lc
 	}
-	podSandboxConfig.Linux = lc
 
 	if runtime.GOOS == "windows" {
 		wc, err := m.generatePodSandboxWindowsConfig(pod)
