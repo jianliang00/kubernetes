@@ -29,14 +29,23 @@ import (
 // directly.
 
 const (
-	// legacyContainerLogsDir is the legacy location of container logs. It is the same with
-	// kubelet.containerLogsDir.
-	legacyContainerLogsDir = "/var/log/containers"
 	// legacyLogSuffix is the legacy log suffix.
 	legacyLogSuffix = "log"
 
 	ext4MaxFileNameLen = 255
 )
+
+var (
+	// legacyContainerLogsDir is the legacy location of container logs. It is the same with
+	// kubelet.containerLogsDir.
+	legacyContainerLogsDir = "/var/log/containers"
+)
+
+func SetLegacyContainerLogsDir(path string) {
+	if path != "" {
+		legacyContainerLogsDir = path
+	}
+}
 
 // legacyLogSymlink composes the legacy container log path. It is only used for legacy cluster
 // logging support.
