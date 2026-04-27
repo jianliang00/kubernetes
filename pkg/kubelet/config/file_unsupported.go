@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 /*
 Copyright 2016 The Kubernetes Authors.
