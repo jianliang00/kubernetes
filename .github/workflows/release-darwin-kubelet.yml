@@ -165,18 +165,19 @@ jobs:
           artifact_name="${{ steps.meta.outputs.artifact_name }}"
 
           if ! gh release view "${release_tag}" >/dev/null 2>&1; then
-            release_args=()
+            release_create_args=(
+              gh release create "${release_tag}"
+              --title "${release_tag}"
+              --notes "Darwin arm64 kubelet for Kubernetes v1.27.2."
+            )
             if [[ "${{ steps.meta.outputs.draft }}" == "true" ]]; then
-              release_args+=(--draft)
+              release_create_args+=(--draft)
             fi
             if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
-              release_args+=(--prerelease)
+              release_create_args+=(--prerelease)
             fi
 
-            gh release create "${release_tag}" \
-              --title "${release_tag}" \
-              --notes "Darwin arm64 kubelet for Kubernetes v1.27.2." \
-              "${release_args[@]}"
+            "${release_create_args[@]}"
           fi
 
           gh release upload "${release_tag}" \
