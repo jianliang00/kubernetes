@@ -14,12 +14,12 @@ on:
       draft:
         description: "Create the release as a draft when it does not exist"
         required: false
-        default: true
+        default: false
         type: boolean
       prerelease:
         description: "Mark the release as a prerelease when it does not exist"
         required: false
-        default: true
+        default: false
         type: boolean
   push:
     tags:
@@ -61,7 +61,7 @@ jobs:
             release_tag="${GITHUB_REF_NAME}"
             artifact_version="${GITHUB_REF_NAME#kubelet-darwin-arm64-k8s-v1.27.2-}"
             draft="false"
-            prerelease="true"
+            prerelease="false"
           fi
 
           if [[ -z "${artifact_version}" ]]; then
