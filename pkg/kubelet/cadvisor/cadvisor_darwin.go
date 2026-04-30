@@ -26,6 +26,7 @@ package cadvisor
 #include <mach/processor_info.h>
 #include <mach/vm_statistics.h>
 #include <stdlib.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 typedef struct {
@@ -79,7 +80,6 @@ typedef struct {
 	uint64_t throttled_count;
 	uint64_t external_page_count;
 	uint64_t internal_page_count;
-	uint64_t swapped_count;
 } darwin_vm_stats_t;
 
 static kern_return_t darwin_get_vm_stats(darwin_vm_stats_t *out) {
@@ -100,8 +100,16 @@ static kern_return_t darwin_get_vm_stats(darwin_vm_stats_t *out) {
 	out->throttled_count = vm.throttled_count;
 	out->external_page_count = vm.external_page_count;
 	out->internal_page_count = vm.internal_page_count;
-	out->swapped_count = vm.swapped_count;
 	return KERN_SUCCESS;
+}
+
+static uint64_t darwin_get_swap_used_bytes(void) {
+	struct xsw_usage swap;
+	size_t size = sizeof(swap);
+	if (sysctlbyname("vm.swapusage", &swap, &size, NULL, 0) != 0) {
+		return 0;
+	}
+	return (uint64_t)swap.xsu_used;
 }
 
 static uint64_t darwin_page_size(void) {
@@ -385,7 +393,7 @@ func darwinMemoryStats(memoryCapacity uint64) (*cadvisorapi.MemoryStats, error) 
 	throttledBytes := uint64(vm.throttled_count) * pageSize
 	externalBytes := uint64(vm.external_page_count) * pageSize
 	internalBytes := uint64(vm.internal_page_count) * pageSize
-	swappedBytes := uint64(vm.swapped_count) * pageSize
+	swappedBytes := uint64(C.darwin_get_swap_used_bytes())
 
 	usage := darwinSaturatingSub(memoryCapacity, freeBytes)
 	workingSet := darwinMin(memoryCapacity, activeBytes+wireBytes+compressorBytes+throttledBytes)
