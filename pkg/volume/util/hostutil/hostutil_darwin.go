@@ -20,6 +20,7 @@ limitations under the License.
 package hostutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,8 @@ import (
 	"k8s.io/mount-utils"
 	utilpath "k8s.io/utils/path"
 )
+
+var errUnsupported = errors.New("volume/util/hostutil mount propagation is not supported on darwin")
 
 // HostUtil implements HostUtils for darwin platforms.
 type HostUtil struct{}
@@ -73,7 +76,7 @@ func getDeviceNameFromMount(mounter mount.Interface, mountPath, pluginMountDir s
 }
 
 func (hu *HostUtil) MakeRShared(path string) error {
-	return nil
+	return errUnsupported
 }
 
 func (hu *HostUtil) GetFileType(pathname string) (FileType, error) {
