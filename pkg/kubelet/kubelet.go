@@ -209,13 +209,6 @@ var (
 	etcHostsPath     = getContainerEtcHostsPath()
 )
 
-func configureContainerLogsDir(rootDirectory string) {
-	if sysruntime.GOOS == "darwin" && ContainerLogsDir == DefaultContainerLogsDir {
-		ContainerLogsDir = filepath.Join(rootDirectory, "logs", "containers")
-	}
-	kuberuntime.SetLegacyContainerLogsDir(ContainerLogsDir)
-}
-
 func getContainerEtcHostsPath() string {
 	if sysruntime.GOOS == "windows" {
 		return windowsEtcHostsPath
@@ -374,7 +367,6 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	if rootDirectory == "" {
 		return nil, fmt.Errorf("invalid root directory %q", rootDirectory)
 	}
-	configureContainerLogsDir(rootDirectory)
 	if kubeCfg.SyncFrequency.Duration <= 0 {
 		return nil, fmt.Errorf("invalid sync frequency %d", kubeCfg.SyncFrequency.Duration)
 	}
