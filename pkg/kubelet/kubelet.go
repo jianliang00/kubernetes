@@ -1329,8 +1329,12 @@ func (kl *Kubelet) setupDataDirs() error {
 	if err := os.MkdirAll(kl.getRootDir(), 0750); err != nil {
 		return fmt.Errorf("error creating root directory: %v", err)
 	}
-	if err := kl.hostutil.MakeRShared(kl.getRootDir()); err != nil {
-		return fmt.Errorf("error configuring root directory: %v", err)
+	if sysruntime.GOOS == "darwin" {
+		klog.V(4).InfoS("Skipping Linux rshared mount propagation setup on darwin", "path", kl.getRootDir())
+	} else {
+		if err := kl.hostutil.MakeRShared(kl.getRootDir()); err != nil {
+			return fmt.Errorf("error configuring root directory: %v", err)
+		}
 	}
 	if err := os.MkdirAll(kl.getPodsDir(), 0750); err != nil {
 		return fmt.Errorf("error creating pods directory: %v", err)
