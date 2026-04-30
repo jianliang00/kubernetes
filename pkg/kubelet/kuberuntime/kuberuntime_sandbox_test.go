@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,6 +76,13 @@ func TestGeneratePodSandboxConfig(t *testing.T) {
 	assert.Equal(t, expectedLogDirectory, podSandboxConfig.LogDirectory)
 	assert.Equal(t, expectedMetadata, podSandboxConfig.Metadata)
 	assert.Equal(t, expectedPortMappings, podSandboxConfig.PortMappings)
+	if runtime.GOOS == "darwin" {
+		assert.Nil(t, podSandboxConfig.Linux)
+		assert.Nil(t, podSandboxConfig.Windows)
+		assert.Equal(t, darwinCRIPlatform, podSandboxConfig.Annotations[darwinCRIPlatformAnnotation])
+		assert.Equal(t, darwinCRIConfigVersion, podSandboxConfig.Annotations[darwinCRIPodSandboxConfigVersionAnnotation])
+		return
+	}
 	assert.Equal(t, expectedLinuxPodSandboxConfig.SecurityContext.SelinuxOptions, podSandboxConfig.Linux.SecurityContext.SelinuxOptions)
 	assert.Equal(t, expectedLinuxPodSandboxConfig.SecurityContext.RunAsUser, podSandboxConfig.Linux.SecurityContext.RunAsUser)
 	assert.Equal(t, expectedLinuxPodSandboxConfig.SecurityContext.RunAsGroup, podSandboxConfig.Linux.SecurityContext.RunAsGroup)

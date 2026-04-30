@@ -1,8 +1,8 @@
-//go:build !linux && !windows && !darwin
-// +build !linux,!windows,!darwin
+//go:build darwin
+// +build darwin
 
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,5 +25,10 @@ import (
 )
 
 func (m *kubeGenericRuntimeManager) applySandboxResources(pod *v1.Pod, config *runtimeapi.PodSandboxConfig) error {
+	if config.Annotations == nil {
+		config.Annotations = map[string]string{}
+	}
+	config.Annotations[darwinCRIPlatformAnnotation] = darwinCRIPlatform
+	config.Annotations[darwinCRIPodSandboxConfigVersionAnnotation] = darwinCRIConfigVersion
 	return nil
 }

@@ -1,8 +1,5 @@
-//go:build !linux && !windows && !darwin
-// +build !linux,!windows,!darwin
-
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,11 +16,10 @@ limitations under the License.
 
 package kuberuntime
 
-import (
-	v1 "k8s.io/api/core/v1"
-	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
+const (
+	darwinCRIPlatformAnnotation                = "io.kubernetes.cri.macos/platform"
+	darwinCRIPodSandboxConfigVersionAnnotation = "io.kubernetes.cri.macos/pod-sandbox-config-version"
+	darwinCRIContainerConfigVersionAnnotation  = "io.kubernetes.cri.macos/container-config-version"
+	darwinCRIConfigVersion                     = "v1alpha1"
+	darwinCRIPlatform                          = "darwin"
 )
-
-func (m *kubeGenericRuntimeManager) applySandboxResources(pod *v1.Pod, config *runtimeapi.PodSandboxConfig) error {
-	return nil
-}

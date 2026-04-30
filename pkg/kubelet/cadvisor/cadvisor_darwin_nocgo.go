@@ -1,8 +1,8 @@
-//go:build !linux && !windows && !darwin
-// +build !linux,!windows,!darwin
+//go:build darwin && !cgo
+// +build darwin,!cgo
 
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kuberuntime
+package cadvisor
 
-import (
-	v1 "k8s.io/api/core/v1"
-	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
-)
+import "errors"
 
-func (m *kubeGenericRuntimeManager) applySandboxResources(pod *v1.Pod, config *runtimeapi.PodSandboxConfig) error {
-	return nil
+// New returns a deterministic build-time configuration error when Darwin is
+// built without cgo. The real Darwin implementation uses Mach host APIs.
+func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupsRoots []string, usingLegacyStats, localStorageCapacityIsolation bool) (Interface, error) {
+	return nil, errors.New("darwin cAdvisor requires CGO_ENABLED=1 to read Mach host statistics")
 }
