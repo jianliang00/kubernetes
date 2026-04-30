@@ -1,0 +1,185 @@
+name: Release Darwin kubelet
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag to create or update"
+        required: true
+        type: string
+      artifact_version:
+        description: "Artifact suffix; defaults to the release tag"
+        required: false
+        type: string
+      draft:
+        description: "Create the release as a draft when it does not exist"
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: "Mark the release as a prerelease when it does not exist"
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "kubelet-darwin-arm64-k8s-v1.27.2-*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and publish darwin/arm64 kubelet
+    # GitHub's macos-14 hosted runner is arm64, which keeps the cgo-backed
+    # Darwin stats path native and avoids cross-compiling Mach calls.
+    runs-on: macos-14
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            release_tag="${{ inputs.release_tag }}"
+            artifact_version="${{ inputs.artifact_version }}"
+            draft="${{ inputs.draft }}"
+            prerelease="${{ inputs.prerelease }}"
+          else
+            release_tag="${GITHUB_REF_NAME}"
+            artifact_version="${GITHUB_REF_NAME#kubelet-darwin-arm64-k8s-v1.27.2-}"
+            draft="false"
+            prerelease="false"
+          fi
+
+          if [[ -z "${artifact_version}" ]]; then
+            if [[ "${release_tag}" == kubelet-darwin-arm64-k8s-v1.27.2-* ]]; then
+              artifact_version="${release_tag#kubelet-darwin-arm64-k8s-v1.27.2-}"
+            else
+              artifact_version="${release_tag}"
+            fi
+          fi
+
+          artifact_name="kubelet-darwin-arm64-k8s-v1.27.2-${artifact_version}"
+          git_commit="$(git rev-parse HEAD)"
+          git_tree_state="clean"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git_tree_state="dirty"
+          fi
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git_version="$(git describe --tags --match 'v*' --always --dirty)"
+
+          {
+            echo "release_tag=${release_tag}"
+            echo "artifact_version=${artifact_version}"
+            echo "artifact_name=${artifact_name}"
+            echo "git_commit=${git_commit}"
+            echo "git_tree_state=${git_tree_state}"
+            echo "build_date=${build_date}"
+            echo "git_version=${git_version}"
+            echo "draft=${draft}"
+            echo "prerelease=${prerelease}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Test Darwin kubelet packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go test \
+            ./cmd/kubelet \
+            ./pkg/kubelet \
+            ./pkg/kubelet/cadvisor \
+            ./pkg/kubelet/kuberuntime
+
+      - name: Build kubelet
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/root/bin dist/root/LICENSES
+
+          ldflags=(
+            "-s"
+            "-w"
+            "-X" "k8s.io/component-base/version.gitVersion=${{ steps.meta.outputs.git_version }}"
+            "-X" "k8s.io/component-base/version.gitCommit=${{ steps.meta.outputs.git_commit }}"
+            "-X" "k8s.io/component-base/version.gitTreeState=${{ steps.meta.outputs.git_tree_state }}"
+            "-X" "k8s.io/component-base/version.buildDate=${{ steps.meta.outputs.build_date }}"
+            "-X" "k8s.io/client-go/pkg/version.gitVersion=${{ steps.meta.outputs.git_version }}"
+            "-X" "k8s.io/client-go/pkg/version.gitCommit=${{ steps.meta.outputs.git_commit }}"
+            "-X" "k8s.io/client-go/pkg/version.gitTreeState=${{ steps.meta.outputs.git_tree_state }}"
+            "-X" "k8s.io/client-go/pkg/version.buildDate=${{ steps.meta.outputs.build_date }}"
+          )
+
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build \
+            -trimpath \
+            -ldflags "${ldflags[*]}" \
+            -o dist/root/bin/kubelet \
+            ./cmd/kubelet
+
+          cp LICENSE dist/root/LICENSES/kubernetes-LICENSE
+          shasum -a 256 dist/root/bin/kubelet > dist/root/SHA256SUMS
+
+          cat > dist/root/manifest.json <<JSON
+          {
+            "artifact": "${{ steps.meta.outputs.artifact_name }}",
+            "kubernetesBaseline": "v1.27.2",
+            "kubernetesForkBranch": "macos-node/v1.27.2",
+            "kubernetesCommit": "${{ steps.meta.outputs.git_commit }}",
+            "gitVersion": "${{ steps.meta.outputs.git_version }}",
+            "gitTreeState": "${{ steps.meta.outputs.git_tree_state }}",
+            "buildDate": "${{ steps.meta.outputs.build_date }}",
+            "goos": "darwin",
+            "goarch": "arm64",
+            "cgoEnabled": true
+          }
+          JSON
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="${{ steps.meta.outputs.artifact_name }}"
+          tar -C dist/root -czf "dist/${artifact_name}.tar.gz" .
+          shasum -a 256 "dist/${artifact_name}.tar.gz" > "dist/${artifact_name}.tar.gz.sha256"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_tag="${{ steps.meta.outputs.release_tag }}"
+          artifact_name="${{ steps.meta.outputs.artifact_name }}"
+
+          if ! gh release view "${release_tag}" >/dev/null 2>&1; then
+            release_args=()
+            if [[ "${{ steps.meta.outputs.draft }}" == "true" ]]; then
+              release_args+=(--draft)
+            fi
+            if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
+              release_args+=(--prerelease)
+            fi
+
+            gh release create "${release_tag}" \
+              --title "${release_tag}" \
+              --notes "Darwin arm64 kubelet for Kubernetes v1.27.2." \
+              "${release_args[@]}"
+          fi
+
+          gh release upload "${release_tag}" \
+            "dist/${artifact_name}.tar.gz" \
+            "dist/${artifact_name}.tar.gz.sha256" \
+            --clobber
