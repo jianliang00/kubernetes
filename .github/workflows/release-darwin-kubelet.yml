@@ -72,6 +72,7 @@ jobs:
             fi
           fi
 
+          kubernetes_baseline="v1.27.2"
           artifact_name="kubelet-darwin-arm64-k8s-v1.27.2-${artifact_version}"
           git_commit="$(git rev-parse HEAD)"
           git_tree_state="clean"
@@ -79,12 +80,13 @@ jobs:
             git_tree_state="dirty"
           fi
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git_version="$(git describe --tags --match 'v*' --always --dirty)"
+          git_version="${kubernetes_baseline}"
 
           {
             echo "release_tag=${release_tag}"
             echo "artifact_version=${artifact_version}"
             echo "artifact_name=${artifact_name}"
+            echo "kubernetes_baseline=${kubernetes_baseline}"
             echo "git_commit=${git_commit}"
             echo "git_tree_state=${git_tree_state}"
             echo "build_date=${build_date}"
@@ -128,13 +130,21 @@ jobs:
             -o dist/root/bin/kubelet \
             ./cmd/kubelet
 
+          kubelet_version="$(dist/root/bin/kubelet --version)"
+          echo "${kubelet_version}"
+          expected_version="Kubernetes ${{ steps.meta.outputs.git_version }}"
+          if [[ "${kubelet_version}" != "${expected_version}" ]]; then
+            echo "unexpected kubelet version: ${kubelet_version}; expected ${expected_version}" >&2
+            exit 1
+          fi
+
           cp LICENSE dist/root/LICENSES/kubernetes-LICENSE
           shasum -a 256 dist/root/bin/kubelet > dist/root/SHA256SUMS
 
           cat > dist/root/manifest.json <<JSON
           {
             "artifact": "${{ steps.meta.outputs.artifact_name }}",
-            "kubernetesBaseline": "v1.27.2",
+            "kubernetesBaseline": "${{ steps.meta.outputs.kubernetes_baseline }}",
             "kubernetesForkBranch": "macos-node/v1.27.2",
             "kubernetesCommit": "${{ steps.meta.outputs.git_commit }}",
             "gitVersion": "${{ steps.meta.outputs.git_version }}",
