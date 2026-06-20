@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -43,6 +44,24 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util"
 	utilptr "k8s.io/utils/pointer"
 )
+
+func TestWrappedVolumeSpecMedium(t *testing.T) {
+	spec := wrappedVolumeSpec()
+	if spec.Volume == nil || spec.Volume.EmptyDir == nil {
+		t.Fatalf("wrapped volume spec should use emptyDir")
+	}
+
+	if goruntime.GOOS == "darwin" {
+		if spec.Volume.EmptyDir.Medium != v1.StorageMediumDefault {
+			t.Fatalf("darwin projected volume wrapper should use default storage medium, got %q", spec.Volume.EmptyDir.Medium)
+		}
+		return
+	}
+
+	if spec.Volume.EmptyDir.Medium != v1.StorageMediumMemory {
+		t.Fatalf("projected volume wrapper should use memory storage medium, got %q", spec.Volume.EmptyDir.Medium)
+	}
+}
 
 func TestCollectDataWithSecret(t *testing.T) {
 	caseMappingMode := int32(0400)
