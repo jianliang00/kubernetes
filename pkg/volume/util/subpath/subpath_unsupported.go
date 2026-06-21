@@ -47,7 +47,7 @@ func (sp *subpath) PrepareSafeSubpath(subPath Subpath) (newHostPath string, clea
 }
 
 func (sp *subpath) CleanSubPaths(podDir string, volumeName string) error {
-	return errUnsupported
+	return nil
 }
 
 func (sp *subpath) SafeMakeDir(pathname string, base string, perm os.FileMode) error {
