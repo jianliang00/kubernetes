@@ -20,13 +20,68 @@ limitations under the License.
 package cm
 
 import (
+	"fmt"
+
 	"k8s.io/mount-utils"
 
+	v1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
+	internalapi "k8s.io/cri-api/pkg/apis"
+	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
+	"k8s.io/kubernetes/pkg/kubelet/config"
+	"k8s.io/kubernetes/pkg/kubelet/status"
 )
 
-func NewContainerManager(_ mount.Interface, _ cadvisor.Interface, _ NodeConfig, failSwapOn bool, recorder record.EventRecorder, kubeClient clientset.Interface) (ContainerManager, error) {
-	return NewStubContainerManager(), nil
+type darwinContainerManager struct {
+	containerManagerStub
+	cadvisorInterface cadvisor.Interface
+	capacity          v1.ResourceList
+}
+
+var _ ContainerManager = &darwinContainerManager{}
+
+func (cm *darwinContainerManager) Start(
+	node *v1.Node,
+	activePods ActivePodsFunc,
+	sourcesReady config.SourcesReady,
+	podStatusProvider status.PodStatusProvider,
+	runtimeService internalapi.RuntimeService,
+	localStorageCapacityIsolation bool,
+) error {
+	if localStorageCapacityIsolation {
+		rootfs, err := cm.cadvisorInterface.RootFsInfo()
+		if err != nil {
+			return fmt.Errorf("failed to get rootfs info: %v", err)
+		}
+		cm.capacity = cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
+	}
+	return cm.containerManagerStub.Start(node, activePods, sourcesReady, podStatusProvider, runtimeService, localStorageCapacityIsolation)
+}
+
+func (cm *darwinContainerManager) GetCapacity(localStorageCapacityIsolation bool) v1.ResourceList {
+	if !localStorageCapacityIsolation {
+		return v1.ResourceList{}
+	}
+	if _, ok := cm.capacity[v1.ResourceEphemeralStorage]; ok {
+		return cm.capacity
+	}
+	if cm.cadvisorInterface == nil {
+		return cm.capacity
+	}
+	rootfs, err := cm.cadvisorInterface.RootFsInfo()
+	if err != nil {
+		klog.ErrorS(err, "Unable to get rootfs data from cAdvisor interface")
+		return cm.capacity
+	}
+	return cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
+}
+
+func NewContainerManager(_ mount.Interface, cadvisorInterface cadvisor.Interface, _ NodeConfig, failSwapOn bool, recorder record.EventRecorder, kubeClient clientset.Interface) (ContainerManager, error) {
+	return &darwinContainerManager{
+		containerManagerStub: containerManagerStub{shouldResetExtendedResourceCapacity: false},
+		cadvisorInterface:    cadvisorInterface,
+		capacity:             v1.ResourceList{},
+	}, nil
 }
