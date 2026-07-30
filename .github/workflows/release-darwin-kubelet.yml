@@ -78,6 +78,7 @@ jobs:
           fi
 
           kubernetes_baseline="v1.36.3"
+          kubernetes_baseline_commit="0f29094e5b73085e3802ecc1298ecae13866bfe6"
           if [[ ! "${release_tag}" =~ ^kubelet-darwin-arm64-k8s-v1\.36\.3-[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
             echo "release tag must match kubelet-darwin-arm64-k8s-v1.36.3-<version>: ${release_tag}" >&2
             exit 1
@@ -86,8 +87,8 @@ jobs:
             echo "artifact version contains unsupported characters: ${artifact_version}" >&2
             exit 1
           fi
-          if ! git merge-base --is-ancestor "${kubernetes_baseline}" HEAD; then
-            echo "current commit is not based on Kubernetes ${kubernetes_baseline}" >&2
+          if ! git merge-base --is-ancestor "${kubernetes_baseline_commit}" HEAD; then
+            echo "current commit is not based on Kubernetes ${kubernetes_baseline} (${kubernetes_baseline_commit})" >&2
             exit 1
           fi
 
