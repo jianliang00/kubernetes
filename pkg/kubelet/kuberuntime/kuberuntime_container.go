@@ -345,6 +345,11 @@ func (m *kubeGenericRuntimeManager) generateContainerConfig(ctx context.Context,
 	if err != nil {
 		return nil, nil, err
 	}
+	for _, env := range opts.Envs {
+		if err := validatePlatformSpecificContainerEnv(env.Name, []byte(env.Value)); err != nil {
+			return nil, cleanupAction, err
+		}
+	}
 
 	uid, username, err := m.getImageUser(ctx, container.Image)
 	if err != nil {

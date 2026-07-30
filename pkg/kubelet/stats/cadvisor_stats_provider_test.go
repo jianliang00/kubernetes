@@ -103,9 +103,9 @@ func TestFilterTerminatedContainerInfoAndAssembleByPodCgroupKey(t *testing.T) {
 	}
 
 	expectedInfoKeys := []string{"pod0-i-terminated-1", "pod0-c0-terminated-1", "pod0-i-terminated-2", "pod0-c0-terminated-2", "pod0-i", "pod0-c0"}
-	// NOTE: on Windows, IsSystemdStyleName will return false, which means that the Container Info will
+	// NOTE: outside Linux, IsSystemdStyleName will return false, which means that the Container Info will
 	// not be assembled by cgroup key.
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS == "linux" {
 		expectedInfoKeys = append(expectedInfoKeys, "c1")
 	} else {
 		expectedInfoKeys = append(expectedInfoKeys, "pod1-c1.slice")

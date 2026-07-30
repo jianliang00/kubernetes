@@ -1,4 +1,4 @@
-//go:build !linux && !windows
+//go:build !linux && !windows && !darwin
 
 /*
 Copyright 2014 The Kubernetes Authors.
@@ -39,7 +39,7 @@ func (sp *subpath) PrepareSafeSubpath(subPath Subpath) (newHostPath string, clea
 }
 
 func (sp *subpath) CleanSubPaths(podDir string, volumeName string) error {
-	return nil
+	return errUnsupported
 }
 
 func (sp *subpath) SafeMakeDir(pathname string, base string, perm os.FileMode) error {

@@ -39,6 +39,21 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestWrappedVolumeSpecMedium(t *testing.T) {
+	spec := wrappedVolumeSpec()
+	if spec.Volume == nil || spec.Volume.EmptyDir == nil {
+		t.Fatal("wrapped volume spec should use emptyDir")
+	}
+
+	want := v1.StorageMediumMemory
+	if runtime.GOOS == "darwin" {
+		want = v1.StorageMediumDefault
+	}
+	if got := spec.Volume.EmptyDir.Medium; got != want {
+		t.Fatalf("wrapped volume medium = %q, want %q", got, want)
+	}
+}
+
 func TestMakePayload(t *testing.T) {
 	caseMappingMode := int32(0400)
 	cases := []struct {

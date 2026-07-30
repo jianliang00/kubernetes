@@ -23,7 +23,7 @@ on:
         type: boolean
   push:
     tags:
-      - "kubelet-darwin-arm64-k8s-v1.27.2-*"
+      - "kubelet-darwin-arm64-k8s-v1.36.3-*"
 
 permissions:
   contents: write
@@ -31,9 +31,9 @@ permissions:
 jobs:
   build-release:
     name: Build and publish darwin/arm64 kubelet
-    # GitHub's macos-14 hosted runner is arm64, which keeps the cgo-backed
+    # GitHub's macos-15 hosted runner is arm64, which keeps the cgo-backed
     # Darwin stats path native and avoids cross-compiling Mach calls.
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Check out source
@@ -48,32 +48,50 @@ jobs:
 
       - name: Resolve release metadata
         id: meta
+        env:
+          INPUT_ARTIFACT_VERSION: ${{ inputs.artifact_version }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            release_tag="${{ inputs.release_tag }}"
-            artifact_version="${{ inputs.artifact_version }}"
-            draft="${{ inputs.draft }}"
-            prerelease="${{ inputs.prerelease }}"
+            release_tag="${INPUT_RELEASE_TAG}"
+            artifact_version="${INPUT_ARTIFACT_VERSION}"
+            draft="${INPUT_DRAFT}"
+            prerelease="${INPUT_PRERELEASE}"
           else
             release_tag="${GITHUB_REF_NAME}"
-            artifact_version="${GITHUB_REF_NAME#kubelet-darwin-arm64-k8s-v1.27.2-}"
+            artifact_version="${GITHUB_REF_NAME#kubelet-darwin-arm64-k8s-v1.36.3-}"
             draft="false"
             prerelease="false"
           fi
 
           if [[ -z "${artifact_version}" ]]; then
-            if [[ "${release_tag}" == kubelet-darwin-arm64-k8s-v1.27.2-* ]]; then
-              artifact_version="${release_tag#kubelet-darwin-arm64-k8s-v1.27.2-}"
+            if [[ "${release_tag}" == kubelet-darwin-arm64-k8s-v1.36.3-* ]]; then
+              artifact_version="${release_tag#kubelet-darwin-arm64-k8s-v1.36.3-}"
             else
               artifact_version="${release_tag}"
             fi
           fi
 
-          kubernetes_baseline="v1.27.2"
-          artifact_name="kubelet-darwin-arm64-k8s-v1.27.2-${artifact_version}"
+          kubernetes_baseline="v1.36.3"
+          if [[ ! "${release_tag}" =~ ^kubelet-darwin-arm64-k8s-v1\.36\.3-[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "release tag must match kubelet-darwin-arm64-k8s-v1.36.3-<version>: ${release_tag}" >&2
+            exit 1
+          fi
+          if [[ ! "${artifact_version}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "artifact version contains unsupported characters: ${artifact_version}" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${kubernetes_baseline}" HEAD; then
+            echo "current commit is not based on Kubernetes ${kubernetes_baseline}" >&2
+            exit 1
+          fi
+
+          artifact_name="kubelet-darwin-arm64-k8s-v1.36.3-${artifact_version}"
           git_commit="$(git rev-parse HEAD)"
           git_tree_state="clean"
           if [[ -n "$(git status --porcelain)" ]]; then
@@ -102,8 +120,22 @@ jobs:
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go test \
             ./cmd/kubelet \
             ./pkg/kubelet \
+            ./pkg/kubelet/allocation \
             ./pkg/kubelet/cadvisor \
-            ./pkg/kubelet/kuberuntime
+            ./pkg/kubelet/cm \
+            ./pkg/kubelet/config \
+            ./pkg/kubelet/kuberuntime \
+            ./pkg/kubelet/stats \
+            ./pkg/volume/downwardapi \
+            ./pkg/volume/projected \
+            ./pkg/volume/secret \
+            ./pkg/volume/util/hostutil \
+            ./pkg/volume/util/subpath
+
+          (
+            cd staging/src/k8s.io/mount-utils
+            CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go test ./...
+          )
 
       - name: Build kubelet
         shell: bash
@@ -139,13 +171,13 @@ jobs:
           fi
 
           cp LICENSE dist/root/LICENSES/kubernetes-LICENSE
-          shasum -a 256 dist/root/bin/kubelet > dist/root/SHA256SUMS
+          (cd dist/root && shasum -a 256 bin/kubelet > SHA256SUMS)
 
           cat > dist/root/manifest.json <<JSON
           {
             "artifact": "${{ steps.meta.outputs.artifact_name }}",
             "kubernetesBaseline": "${{ steps.meta.outputs.kubernetes_baseline }}",
-            "kubernetesForkBranch": "macos-node/v1.27.2",
+            "kubernetesForkBranch": "macos-node/v1.36.3",
             "kubernetesCommit": "${{ steps.meta.outputs.git_commit }}",
             "gitVersion": "${{ steps.meta.outputs.git_version }}",
             "gitTreeState": "${{ steps.meta.outputs.git_tree_state }}",
@@ -162,35 +194,55 @@ jobs:
           set -euo pipefail
           artifact_name="${{ steps.meta.outputs.artifact_name }}"
           tar -C dist/root -czf "dist/${artifact_name}.tar.gz" .
-          shasum -a 256 "dist/${artifact_name}.tar.gz" > "dist/${artifact_name}.tar.gz.sha256"
+          (cd dist && shasum -a 256 "${artifact_name}.tar.gz" > "${artifact_name}.tar.gz.sha256")
 
       - name: Create or update GitHub Release
         env:
+          ARTIFACT_NAME: ${{ steps.meta.outputs.artifact_name }}
           GH_TOKEN: ${{ github.token }}
+          GIT_COMMIT: ${{ steps.meta.outputs.git_commit }}
+          RELEASE_DRAFT: ${{ steps.meta.outputs.draft }}
+          RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
 
-          release_tag="${{ steps.meta.outputs.release_tag }}"
-          artifact_name="${{ steps.meta.outputs.artifact_name }}"
+          release_exists="false"
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            release_exists="true"
+          fi
 
-          if ! gh release view "${release_tag}" >/dev/null 2>&1; then
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}" >/dev/null 2>&1 || true
+          if git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"; then
+            existing_tag_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+            if [[ "${existing_tag_commit}" != "${GIT_COMMIT}" ]]; then
+              echo "release tag ${RELEASE_TAG} points to ${existing_tag_commit}, expected ${GIT_COMMIT}" >&2
+              exit 1
+            fi
+          elif [[ "${release_exists}" == "true" ]]; then
+            echo "release ${RELEASE_TAG} exists but its git tag could not be verified" >&2
+            exit 1
+          fi
+
+          if [[ "${release_exists}" == "false" ]]; then
             release_create_args=(
-              gh release create "${release_tag}"
-              --title "${release_tag}"
-              --notes "Darwin arm64 kubelet for Kubernetes v1.27.2."
+              gh release create "${RELEASE_TAG}"
+              --target "${GIT_COMMIT}"
+              --title "${RELEASE_TAG}"
+              --notes "Darwin arm64 kubelet for Kubernetes v1.36.3."
             )
-            if [[ "${{ steps.meta.outputs.draft }}" == "true" ]]; then
+            if [[ "${RELEASE_DRAFT}" == "true" ]]; then
               release_create_args+=(--draft)
             fi
-            if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
+            if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
               release_create_args+=(--prerelease)
             fi
 
             "${release_create_args[@]}"
           fi
 
-          gh release upload "${release_tag}" \
-            "dist/${artifact_name}.tar.gz" \
-            "dist/${artifact_name}.tar.gz.sha256" \
+          gh release upload "${RELEASE_TAG}" \
+            "dist/${ARTIFACT_NAME}.tar.gz" \
+            "dist/${ARTIFACT_NAME}.tar.gz.sha256" \
             --clobber

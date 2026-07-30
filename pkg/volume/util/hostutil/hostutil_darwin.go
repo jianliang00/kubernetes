@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -31,7 +30,7 @@ import (
 	utilpath "k8s.io/utils/path"
 )
 
-var errUnsupported = errors.New("volume/util/hostutil mount propagation is not supported on darwin")
+var errUnsupported = errors.New("volume/util/hostutil operation is not supported on darwin")
 
 // HostUtil implements HostUtils for darwin platforms.
 type HostUtil struct{}
@@ -41,8 +40,8 @@ func NewHostUtil() *HostUtil {
 	return &HostUtil{}
 }
 
-func (hu *HostUtil) DeviceOpened(pathname string) (bool, error) {
-	return false, nil
+func (hu *HostUtil) DeviceOpened(_ string) (bool, error) {
+	return false, errUnsupported
 }
 
 func (hu *HostUtil) PathIsDevice(pathname string) (bool, error) {
@@ -68,7 +67,7 @@ func getDeviceNameFromMount(mounter mount.Interface, mountPath, pluginMountDir s
 		if !filepath.IsAbs(ref) {
 			continue
 		}
-		if rel, err := filepath.Rel(pluginMountDir, ref); err == nil && rel != "." && !filepath.IsAbs(rel) && rel != ".." {
+		if rel, err := filepath.Rel(pluginMountDir, ref); err == nil && rel != "." && !filepath.IsAbs(rel) && !mount.StartsWithBackstep(rel) {
 			return rel, nil
 		}
 	}

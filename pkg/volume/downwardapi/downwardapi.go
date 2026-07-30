@@ -51,12 +51,6 @@ func getPath(uid types.UID, volName string, host volume.VolumeHost) string {
 	return host.GetPodVolumeDir(uid, utilstrings.EscapeQualifiedName(downwardAPIPluginName), volName)
 }
 
-func wrappedVolumeSpec() volume.Spec {
-	return volume.Spec{
-		Volume: &v1.Volume{VolumeSource: v1.VolumeSource{EmptyDir: &v1.EmptyDirVolumeSource{Medium: v1.StorageMediumMemory}}},
-	}
-}
-
 func (plugin *downwardAPIPlugin) Init(host volume.VolumeHost) error {
 	plugin.host = host
 	return nil

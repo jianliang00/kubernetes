@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -20,11 +19,14 @@ limitations under the License.
 package cm
 
 import (
+	"context"
 	"fmt"
+	"sync"
 
 	"k8s.io/mount-utils"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	internalapi "k8s.io/cri-api/pkg/apis"
@@ -38,13 +40,17 @@ type darwinContainerManager struct {
 	containerManagerStub
 	cadvisorInterface cadvisor.Interface
 	capacity          v1.ResourceList
+	nodeConfig        NodeConfig
+	sync.RWMutex
 }
 
 var _ ContainerManager = &darwinContainerManager{}
 
 func (cm *darwinContainerManager) Start(
+	ctx context.Context,
 	node *v1.Node,
 	activePods ActivePodsFunc,
+	getNode GetNodeFunc,
 	sourcesReady config.SourcesReady,
 	podStatusProvider status.PodStatusProvider,
 	runtimeService internalapi.RuntimeService,
@@ -55,33 +61,82 @@ func (cm *darwinContainerManager) Start(
 		if err != nil {
 			return fmt.Errorf("failed to get rootfs info: %v", err)
 		}
-		cm.capacity = cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
+		cm.Lock()
+		for resourceName, resourceCapacity := range cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs) {
+			cm.capacity[resourceName] = resourceCapacity
+		}
+		cm.Unlock()
 	}
-	return cm.containerManagerStub.Start(node, activePods, sourcesReady, podStatusProvider, runtimeService, localStorageCapacityIsolation)
+	return cm.containerManagerStub.Start(ctx, node, activePods, getNode, sourcesReady, podStatusProvider, runtimeService, localStorageCapacityIsolation)
 }
 
 func (cm *darwinContainerManager) GetCapacity(localStorageCapacityIsolation bool) v1.ResourceList {
 	if !localStorageCapacityIsolation {
 		return v1.ResourceList{}
 	}
-	if _, ok := cm.capacity[v1.ResourceEphemeralStorage]; ok {
-		return cm.capacity
+
+	cm.RLock()
+	capacity := make(v1.ResourceList, len(cm.capacity)+1)
+	for resourceName, resourceCapacity := range cm.capacity {
+		capacity[resourceName] = resourceCapacity.DeepCopy()
 	}
-	if cm.cadvisorInterface == nil {
-		return cm.capacity
+	_, hasEphemeralStorage := capacity[v1.ResourceEphemeralStorage]
+	cadvisorInterface := cm.cadvisorInterface
+	cm.RUnlock()
+
+	if hasEphemeralStorage || cadvisorInterface == nil {
+		return capacity
 	}
-	rootfs, err := cm.cadvisorInterface.RootFsInfo()
+	rootfs, err := cadvisorInterface.RootFsInfo()
 	if err != nil {
 		klog.ErrorS(err, "Unable to get rootfs data from cAdvisor interface")
-		return cm.capacity
+		return capacity
 	}
-	return cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
+	for resourceName, resourceCapacity := range cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs) {
+		capacity[resourceName] = resourceCapacity
+	}
+	return capacity
 }
 
-func NewContainerManager(_ mount.Interface, cadvisorInterface cadvisor.Interface, _ NodeConfig, failSwapOn bool, recorder record.EventRecorder, kubeClient clientset.Interface) (ContainerManager, error) {
+func (cm *darwinContainerManager) GetNodeConfig() NodeConfig {
+	cm.RLock()
+	defer cm.RUnlock()
+	return cm.nodeConfig
+}
+
+func (cm *darwinContainerManager) GetNodeAllocatableReservation() v1.ResourceList {
+	cm.RLock()
+	defer cm.RUnlock()
+
+	evictionReservation := hardEvictionReservation(cm.nodeConfig.HardEvictionThresholds, cm.capacity)
+	result := make(v1.ResourceList)
+	for resourceName := range cm.capacity {
+		value := resource.NewQuantity(0, resource.DecimalSI)
+		if cm.nodeConfig.SystemReserved != nil {
+			value.Add(cm.nodeConfig.SystemReserved[resourceName])
+		}
+		if cm.nodeConfig.KubeReserved != nil {
+			value.Add(cm.nodeConfig.KubeReserved[resourceName])
+		}
+		if evictionReservation != nil {
+			value.Add(evictionReservation[resourceName])
+		}
+		if !value.IsZero() {
+			result[resourceName] = *value
+		}
+	}
+	return result
+}
+
+func NewContainerManager(_ context.Context, _ mount.Interface, cadvisorInterface cadvisor.Interface, nodeConfig NodeConfig, _ bool, _ record.EventRecorder, _ clientset.Interface) (ContainerManager, error) {
+	machineInfo, err := cadvisorInterface.MachineInfo()
+	if err != nil {
+		return nil, err
+	}
 	return &darwinContainerManager{
 		containerManagerStub: containerManagerStub{shouldResetExtendedResourceCapacity: false},
 		cadvisorInterface:    cadvisorInterface,
-		capacity:             v1.ResourceList{},
+		capacity:             cadvisor.CapacityFromMachineInfo(machineInfo),
+		nodeConfig:           nodeConfig,
 	}, nil
 }

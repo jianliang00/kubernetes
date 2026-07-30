@@ -42,6 +42,21 @@ const (
 	testName       = "test_metadata_name"
 )
 
+func TestWrappedVolumeSpecMedium(t *testing.T) {
+	spec := wrappedVolumeSpec()
+	if spec.Volume == nil || spec.Volume.EmptyDir == nil {
+		t.Fatal("wrapped volume spec should use emptyDir")
+	}
+
+	want := v1.StorageMediumMemory
+	if runtime.GOOS == "darwin" {
+		want = v1.StorageMediumDefault
+	}
+	if got := spec.Volume.EmptyDir.Medium; got != want {
+		t.Fatalf("wrapped volume medium = %q, want %q", got, want)
+	}
+}
+
 func newTestHost(t *testing.T, clientset clientset.Interface) (string, volume.VolumeHost) {
 	tempDir, err := utiltesting.MkTmpdir("downwardApi_volume_test.")
 	if err != nil {

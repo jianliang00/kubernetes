@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -20,11 +19,16 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"context"
+
 	v1 "k8s.io/api/core/v1"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
-func (m *kubeGenericRuntimeManager) applySandboxResources(pod *v1.Pod, config *runtimeapi.PodSandboxConfig) error {
+func (m *kubeGenericRuntimeManager) applySandboxResources(_ context.Context, pod *v1.Pod, config *runtimeapi.PodSandboxConfig) error {
+	if err := validateDarwinPodSandboxConfig(pod); err != nil {
+		return err
+	}
 	if config.Annotations == nil {
 		config.Annotations = map[string]string{}
 	}

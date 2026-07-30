@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -21,10 +20,14 @@ package cadvisor
 
 /*
 #cgo CFLAGS: -Wno-deprecated-declarations
+#cgo LDFLAGS: -framework CoreFoundation -framework IOKit
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <mach/processor_info.h>
 #include <mach/vm_statistics.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
@@ -53,10 +56,12 @@ static kern_return_t darwin_get_cpu_load(darwin_cpu_load_t **loads, natural_t *c
 
 	for (natural_t i = 0; i < count; i++) {
 		integer_t *cpu = cpu_info + (CPU_STATE_MAX * i);
-		out[i].user = (uint64_t)cpu[CPU_STATE_USER];
-		out[i].nice = (uint64_t)cpu[CPU_STATE_NICE];
-		out[i].system = (uint64_t)cpu[CPU_STATE_SYSTEM];
-		out[i].idle = (uint64_t)cpu[CPU_STATE_IDLE];
+		// The Mach counters are unsigned 32-bit tick counters exposed through
+		// signed integer_t slots. Preserve their bit pattern after INT32_MAX.
+		out[i].user = (uint64_t)(uint32_t)cpu[CPU_STATE_USER];
+		out[i].nice = (uint64_t)(uint32_t)cpu[CPU_STATE_NICE];
+		out[i].system = (uint64_t)(uint32_t)cpu[CPU_STATE_SYSTEM];
+		out[i].idle = (uint64_t)(uint32_t)cpu[CPU_STATE_IDLE];
 	}
 
 	vm_deallocate(mach_task_self(), (vm_address_t)cpu_info, cpu_info_count * sizeof(integer_t));
@@ -115,39 +120,90 @@ static uint64_t darwin_get_swap_used_bytes(void) {
 static uint64_t darwin_page_size(void) {
 	return (uint64_t)getpagesize();
 }
+
+static char *darwin_copy_platform_string(CFStringRef key) {
+	io_registry_entry_t platform = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"));
+	if (platform == MACH_PORT_NULL) {
+		return NULL;
+	}
+
+	CFTypeRef value = IORegistryEntryCreateCFProperty(platform, key, kCFAllocatorDefault, 0);
+	IOObjectRelease(platform);
+	if (value == NULL || CFGetTypeID(value) != CFStringGetTypeID()) {
+		if (value != NULL) {
+			CFRelease(value);
+		}
+		return NULL;
+	}
+
+	CFStringRef string = (CFStringRef)value;
+	CFIndex size = CFStringGetMaximumSizeForEncoding(CFStringGetLength(string), kCFStringEncodingUTF8) + 1;
+	if (size <= 0) {
+		CFRelease(value);
+		return NULL;
+	}
+	char *result = calloc((size_t)size, sizeof(char));
+	if (result == NULL || !CFStringGetCString(string, result, size, kCFStringEncodingUTF8)) {
+		free(result);
+		result = NULL;
+	}
+	CFRelease(value);
+	return result;
+}
+
+static char *darwin_copy_platform_uuid(void) {
+	return darwin_copy_platform_string(CFSTR("IOPlatformUUID"));
+}
+
+static char *darwin_copy_platform_serial_number(void) {
+	return darwin_copy_platform_string(CFSTR("IOPlatformSerialNumber"));
+}
 */
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
-	"github.com/google/cadvisor/events"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 	cadvisorapiv2 "github.com/google/cadvisor/info/v2"
 	"golang.org/x/sys/unix"
+	"k8s.io/klog/v2"
 )
 
 type cadvisorDarwin struct {
+	logger      klog.Logger
 	rootPath    string
 	machineInfo *cadvisorapi.MachineInfo
 	bootTime    time.Time
+
+	statsMu      sync.Mutex
+	statsHistory []*cadvisorapiv2.ContainerStats
 }
 
 var _ Interface = new(cadvisorDarwin)
 
 var errDarwinNonRootContainer = errors.New("darwin cAdvisor only provides host root container stats; pod and workload stats must come from CRI")
 
-const darwinRootContainerName = "/"
+const (
+	darwinRootContainerName        = "/"
+	darwinInitialCPUSampleInterval = 100 * time.Millisecond
+	darwinStatsHistorySize         = 2
+)
 
 // New creates a cAdvisor Interface backed by real Darwin host statistics.
-func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupsRoots []string, usingLegacyStats, localStorageCapacityIsolation bool) (Interface, error) {
+func New(logger klog.Logger, _ ImageFsInfoProvider, rootPath string, _ []string, _, _ bool) (Interface, error) {
 	bootTime := darwinBootTime()
 	return &cadvisorDarwin{
+		logger:      logger,
 		rootPath:    rootPath,
 		machineInfo: darwinMachineInfo(bootTime),
 		bootTime:    bootTime,
@@ -158,37 +214,18 @@ func (c *cadvisorDarwin) Start() error {
 	return nil
 }
 
-func (c *cadvisorDarwin) DockerContainer(name string, req *cadvisorapi.ContainerInfoRequest) (cadvisorapi.ContainerInfo, error) {
-	info, err := c.ContainerInfo(name, req)
-	if err != nil {
-		return cadvisorapi.ContainerInfo{}, err
-	}
-	return *info, nil
-}
-
-func (c *cadvisorDarwin) ContainerInfo(name string, req *cadvisorapi.ContainerInfoRequest) (*cadvisorapi.ContainerInfo, error) {
-	if !isDarwinRootContainer(name) {
-		return nil, fmt.Errorf("%w: %q", errDarwinNonRootContainer, name)
-	}
-	sample, err := c.hostContainerStats()
-	if err != nil {
-		return nil, err
-	}
-	return c.rootContainerInfoV1(sample), nil
-}
-
 func (c *cadvisorDarwin) ContainerInfoV2(name string, options cadvisorapiv2.RequestOptions) (map[string]cadvisorapiv2.ContainerInfo, error) {
 	if !isDarwinRootContainer(name) {
 		return nil, fmt.Errorf("%w: %q", errDarwinNonRootContainer, name)
 	}
-	sample, err := c.hostContainerStats()
+	stats, err := c.requestedHostContainerStats(options)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]cadvisorapiv2.ContainerInfo{
 		darwinRootContainerName: {
 			Spec:  c.rootContainerSpecV2(),
-			Stats: []*cadvisorapiv2.ContainerStats{sample},
+			Stats: stats,
 		},
 	}, nil
 }
@@ -206,13 +243,6 @@ func (c *cadvisorDarwin) GetRequestedContainersInfo(containerName string, option
 	}, nil
 }
 
-func (c *cadvisorDarwin) SubcontainerInfo(name string, req *cadvisorapi.ContainerInfoRequest) (map[string]*cadvisorapi.ContainerInfo, error) {
-	if !isDarwinRootContainer(name) {
-		return nil, fmt.Errorf("%w: %q", errDarwinNonRootContainer, name)
-	}
-	return map[string]*cadvisorapi.ContainerInfo{}, nil
-}
-
 func (c *cadvisorDarwin) MachineInfo() (*cadvisorapi.MachineInfo, error) {
 	return c.machineInfo.Clone(), nil
 }
@@ -225,7 +255,7 @@ func (c *cadvisorDarwin) VersionInfo() (*cadvisorapi.VersionInfo, error) {
 	}, nil
 }
 
-func (c *cadvisorDarwin) ImagesFsInfo() (cadvisorapiv2.FsInfo, error) {
+func (c *cadvisorDarwin) ImagesFsInfo(context.Context) (cadvisorapiv2.FsInfo, error) {
 	return c.RootFsInfo()
 }
 
@@ -233,8 +263,8 @@ func (c *cadvisorDarwin) RootFsInfo() (cadvisorapiv2.FsInfo, error) {
 	return c.GetDirFsInfo(c.rootPath)
 }
 
-func (c *cadvisorDarwin) WatchEvents(request *events.Request) (*events.EventChannel, error) {
-	return &events.EventChannel{}, nil
+func (c *cadvisorDarwin) ContainerFsInfo(context.Context) (cadvisorapiv2.FsInfo, error) {
+	return c.RootFsInfo()
 }
 
 func (c *cadvisorDarwin) GetDirFsInfo(path string) (cadvisorapiv2.FsInfo, error) {
@@ -258,6 +288,10 @@ func (c *cadvisorDarwin) GetDirFsInfo(path string) (cadvisorapiv2.FsInfo, error)
 		Inodes:     &inodes,
 		InodesFree: &inodesFree,
 	}, nil
+}
+
+func IsPsiEnabled(_ klog.Logger) bool {
+	return false
 }
 
 func (c *cadvisorDarwin) hostContainerStats() (*cadvisorapiv2.ContainerStats, error) {
@@ -325,9 +359,13 @@ func (c *cadvisorDarwin) rootContainerInfoV1(sample *cadvisorapiv2.ContainerStat
 
 func (c *cadvisorDarwin) rootContainerSpecV1() cadvisorapi.ContainerSpec {
 	return cadvisorapi.ContainerSpec{
-		CreationTime:  c.bootTime,
-		HasCpu:        true,
-		HasMemory:     true,
+		CreationTime: c.bootTime,
+		HasCpu:       true,
+		HasMemory:    true,
+		Memory: cadvisorapi.MemorySpec{
+			Limit:     c.machineInfo.MemoryCapacity,
+			SwapLimit: math.MaxUint64,
+		},
 		HasProcesses:  true,
 		HasFilesystem: true,
 	}
@@ -335,12 +373,99 @@ func (c *cadvisorDarwin) rootContainerSpecV1() cadvisorapi.ContainerSpec {
 
 func (c *cadvisorDarwin) rootContainerSpecV2() cadvisorapiv2.ContainerSpec {
 	return cadvisorapiv2.ContainerSpec{
-		CreationTime:  c.bootTime,
-		HasCpu:        true,
-		HasMemory:     true,
+		CreationTime: c.bootTime,
+		HasCpu:       true,
+		HasMemory:    true,
+		Memory: cadvisorapiv2.MemorySpec{
+			Limit:     c.machineInfo.MemoryCapacity,
+			SwapLimit: math.MaxUint64,
+		},
 		HasProcesses:  true,
 		HasFilesystem: true,
 	}
+}
+
+// requestedHostContainerStats keeps the two latest samples so cAdvisor can
+// derive instantaneous CPU usage without running a background collector. The
+// first request is bootstrapped with two samples. A nil MaxAge uses a short
+// cache interval, while an explicit MaxAge preserves cAdvisor's on-demand
+// refresh contract.
+func (c *cadvisorDarwin) requestedHostContainerStats(options cadvisorapiv2.RequestOptions) ([]*cadvisorapiv2.ContainerStats, error) {
+	if options.Count == 0 && options.MaxAge == nil {
+		return nil, nil
+	}
+
+	c.statsMu.Lock()
+	defer c.statsMu.Unlock()
+
+	bootstrapping := false
+	if len(c.statsHistory) == 0 {
+		initial, err := c.hostContainerStats()
+		if err != nil {
+			return nil, err
+		}
+		c.appendHostContainerStats(initial)
+		time.Sleep(darwinInitialCPUSampleInterval)
+		bootstrapping = true
+	}
+
+	latest := c.statsHistory[len(c.statsHistory)-1]
+	maxAge := darwinInitialCPUSampleInterval
+	if options.MaxAge != nil {
+		maxAge = *options.MaxAge
+	}
+	if bootstrapping || time.Since(latest.Timestamp) > maxAge {
+		current, err := c.hostContainerStats()
+		if err != nil {
+			return nil, err
+		}
+		c.appendHostContainerStats(current)
+	}
+
+	if options.Count == 0 {
+		return nil, nil
+	}
+	start := 0
+	if options.Count > 0 && options.Count < len(c.statsHistory) {
+		start = len(c.statsHistory) - options.Count
+	}
+	return append([]*cadvisorapiv2.ContainerStats(nil), c.statsHistory[start:]...), nil
+}
+
+func (c *cadvisorDarwin) appendHostContainerStats(current *cadvisorapiv2.ContainerStats) {
+	if len(c.statsHistory) != 0 {
+		previous := c.statsHistory[len(c.statsHistory)-1]
+		cpuInst, err := darwinInstantCPUStats(previous, current)
+		if err != nil {
+			c.logger.Error(err, "Unable to derive instantaneous Darwin CPU stats")
+			// A 32-bit Mach tick counter wraps by design. Retain the last valid
+			// rate for this one sample and use the current counters as the next
+			// baseline, instead of publishing a spike or zero value.
+			current.CpuInst = previous.CpuInst
+			c.statsHistory = c.statsHistory[:0]
+		} else {
+			current.CpuInst = cpuInst
+			if cpuInst.Usage.Total == 0 && previous.CpuInst != nil && current.Timestamp.Sub(previous.Timestamp) < darwinInitialCPUSampleInterval {
+				// An on-demand sample can land inside the Mach tick interval.
+				// Keep the last measured rate rather than publishing a false zero.
+				current.CpuInst = previous.CpuInst
+			}
+		}
+	}
+	c.statsHistory = append(c.statsHistory, current)
+	if len(c.statsHistory) > darwinStatsHistorySize {
+		c.statsHistory = c.statsHistory[len(c.statsHistory)-darwinStatsHistorySize:]
+	}
+}
+
+func darwinInstantCPUStats(previous, current *cadvisorapiv2.ContainerStats) (*cadvisorapiv2.CpuInstStats, error) {
+	if previous == nil || previous.Cpu == nil || current == nil || current.Cpu == nil {
+		return nil, errors.New("cannot derive instantaneous CPU stats without two cumulative CPU samples")
+	}
+	return cadvisorapiv2.InstCpuStats(
+		&cadvisorapi.ContainerStats{Timestamp: previous.Timestamp, Cpu: *previous.Cpu},
+		&cadvisorapi.ContainerStats{Timestamp: current.Timestamp, Cpu: *current.Cpu},
+	)
 }
 
 func darwinCPUStats() (*cadvisorapi.CpuStats, error) {
@@ -431,6 +556,7 @@ func darwinMachineInfo(bootTime time.Time) *cadvisorapi.MachineInfo {
 			Cores:  darwinCores(numCPU),
 		},
 	}
+	machineID, systemUUID := darwinMachineIdentifiers(darwinPlatformUUID(), darwinPlatformSerialNumber())
 	return &cadvisorapi.MachineInfo{
 		Timestamp:        time.Now(),
 		CPUVendorID:      darwinSysctlString("machdep.cpu.brand_string", darwinSysctlString("machdep.cpu.vendor", "apple")),
@@ -438,14 +564,40 @@ func darwinMachineInfo(bootTime time.Time) *cadvisorapi.MachineInfo {
 		NumPhysicalCores: numCPU,
 		NumSockets:       1,
 		MemoryCapacity:   memoryCapacity,
-		MachineID:        darwinSysctlString("hw.model", "darwin"),
-		SystemUUID:       darwinSysctlString("kern.hostuuid", darwinSysctlString("hw.model", "darwin")),
+		MachineID:        machineID,
+		SystemUUID:       systemUUID,
 		BootID:           fmt.Sprintf("%d", bootTime.UnixNano()),
 		Topology:         topology,
 		CloudProvider:    cadvisorapi.UnknownProvider,
 		InstanceType:     cadvisorapi.UnknownInstance,
 		InstanceID:       cadvisorapi.UnNamedInstance,
 	}
+}
+
+func darwinMachineIdentifiers(platformUUID, serialNumber string) (machineID, systemUUID string) {
+	platformUUID = strings.ToLower(strings.TrimSpace(platformUUID))
+	if platformUUID != "" {
+		return platformUUID, platformUUID
+	}
+	return strings.ToLower(strings.TrimSpace(serialNumber)), ""
+}
+
+func darwinPlatformUUID() string {
+	value := C.darwin_copy_platform_uuid()
+	if value == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+func darwinPlatformSerialNumber() string {
+	value := C.darwin_copy_platform_serial_number()
+	if value == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
 }
 
 func darwinCores(numCPU int) []cadvisorapi.Core {

@@ -306,8 +306,8 @@ func TestUpdatePodFromAllocation(t *testing.T) {
 }
 
 func TestRetryPendingResizes(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("InPlacePodVerticalScaling is not currently supported for Windows")
+	if goruntime.GOOS != "linux" {
+		t.Skip("InPlacePodVerticalScaling is currently supported only on Linux")
 	}
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)
 	containerRestartPolicyAlways := v1.ContainerRestartPolicyAlways
@@ -865,8 +865,8 @@ func TestRetryPendingResizes(t *testing.T) {
 }
 
 func TestRetryPendingResizesGuanteedQOSPods(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("InPlacePodVerticalScaling is not currently supported for Windows")
+	if goruntime.GOOS != "linux" {
+		t.Skip("InPlacePodVerticalScaling is currently supported only on Linux")
 	}
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)
 
@@ -1113,8 +1113,8 @@ func TestRetryPendingResizesGuanteedQOSPods(t *testing.T) {
 }
 
 func TestRetryPendingResizesWithSwap(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("InPlacePodVerticalScaling is not currently supported for Windows")
+	if goruntime.GOOS != "linux" {
+		t.Skip("InPlacePodVerticalScaling is currently supported only on Linux")
 	}
 	metrics.Register()
 	metrics.PodInfeasibleResizes.Reset()
@@ -1287,8 +1287,8 @@ func TestRetryPendingResizesWithSwap(t *testing.T) {
 }
 
 func TestRetryPendingResizesMultipleConditions(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("InPlacePodVerticalScaling is not currently supported for Windows")
+	if goruntime.GOOS != "linux" {
+		t.Skip("InPlacePodVerticalScaling is currently supported only on Linux")
 	}
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)
 
@@ -2305,8 +2305,8 @@ func TestSortPendingResizes(t *testing.T) {
 }
 
 func TestRecordPodDeferredAcceptedResizes(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("InPlacePodVerticalScaling is not currently supported for Windows")
+	if goruntime.GOOS != "linux" {
+		t.Skip("InPlacePodVerticalScaling is currently supported only on Linux")
 	}
 
 	metrics.Register()

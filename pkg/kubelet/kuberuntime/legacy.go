@@ -32,7 +32,6 @@ const (
 	// legacyContainerLogsDir is the legacy location of container logs. It is the same with
 	// kubelet.containerLogsDir.
 	legacyContainerLogsDir = "/var/log/containers"
-
 	// legacyLogSuffix is the legacy log suffix.
 	legacyLogSuffix = "log"
 

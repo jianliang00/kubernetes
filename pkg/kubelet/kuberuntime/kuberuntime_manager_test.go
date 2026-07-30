@@ -673,6 +673,9 @@ func TestSyncPod(t *testing.T) {
 }
 
 func TestSyncPodWithConvertedPodSysctls(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("sysctls are not supported by the macOS CRI contract")
+	}
 	tCtx := ktesting.Init(t)
 	fakeRuntime, _, m, err := createTestRuntimeManager(tCtx)
 	assert.NoError(t, err)
@@ -1792,11 +1795,11 @@ func TestComputePodActionsWithInitContainers(t *testing.T) {
 	}
 
 	for desc, test := range map[string]struct {
-		mutatePodFn          func(*v1.Pod)
-		mutateStatusFn       func(*kubecontainer.PodStatus)
-		actions              podActions
-		disableIPPRInitCtrFG bool
-		skipWindows          bool
+		mutatePodFn           func(*v1.Pod)
+		mutateStatusFn        func(*kubecontainer.PodStatus)
+		actions               podActions
+		disableIPPRInitCtrFG  bool
+		skipUnsupportedResize bool
 	}{
 		"initialization completed; start all containers": {
 			actions: podActions{
@@ -2046,7 +2049,7 @@ func TestComputePodActionsWithInitContainers(t *testing.T) {
 					},
 				},
 			},
-			skipWindows: true, // Windows does not support resize.
+			skipUnsupportedResize: true,
 		},
 		"resize of a running non-sidecar init container with FG disabled": {
 			mutatePodFn: func(pod *v1.Pod) {
@@ -2067,13 +2070,13 @@ func TestComputePodActionsWithInitContainers(t *testing.T) {
 				ContainersToKill:      getKillMapWithInitContainers(basePod, baseStatus, []int{}),
 				ContainersToUpdate:    map[v1.ResourceName][]containerToUpdateInfo{},
 			},
-			skipWindows:          true, // Windows does not support resize.
-			disableIPPRInitCtrFG: true,
+			skipUnsupportedResize: true,
+			disableIPPRInitCtrFG:  true,
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {
-			if test.skipWindows && goruntime.GOOS == "windows" {
-				t.Skip("Skipping test since Windows does not support resize")
+			if test.skipUnsupportedResize && goruntime.GOOS != "linux" {
+				t.Skip("In-place pod resize is currently supported only on Linux")
 			}
 			if test.disableIPPRInitCtrFG {
 				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScalingInitContainers, false)
@@ -2931,8 +2934,8 @@ func makeBasePodAndStatusWithInitAndEphemeralContainers() (*v1.Pod, *kubecontain
 }
 
 func TestComputePodActionsForPodResize(t *testing.T) {
-	if goruntime.GOOS == "windows" {
-		t.Skip("InPlacePodVerticalScaling is currently not supported on Windows")
+	if goruntime.GOOS != "linux" {
+		t.Skip("InPlacePodVerticalScaling is currently supported only on Linux")
 	}
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)
 

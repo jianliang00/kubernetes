@@ -49,12 +49,6 @@ type secretPlugin struct {
 
 var _ volume.VolumePlugin = &secretPlugin{}
 
-func wrappedVolumeSpec() volume.Spec {
-	return volume.Spec{
-		Volume: &v1.Volume{VolumeSource: v1.VolumeSource{EmptyDir: &v1.EmptyDirVolumeSource{Medium: v1.StorageMediumMemory}}},
-	}
-}
-
 func getPath(uid types.UID, volName string, host volume.VolumeHost) string {
 	return host.GetPodVolumeDir(uid, utilstrings.EscapeQualifiedName(secretPluginName), volName)
 }

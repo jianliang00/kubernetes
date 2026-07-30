@@ -1,5 +1,4 @@
-//go:build !linux && !windows
-// +build !linux,!windows
+//go:build darwin
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -21,14 +20,14 @@ package subpath
 
 import "testing"
 
-func TestCleanSubPathsUnsupportedPlatformNoop(t *testing.T) {
+func TestCleanSubPathsDarwinNoop(t *testing.T) {
 	sp := New(nil)
 	if err := sp.CleanSubPaths(t.TempDir(), "volume"); err != nil {
 		t.Fatalf("CleanSubPaths() returned error: %v", err)
 	}
 }
 
-func TestPrepareSafeSubpathUnsupportedPlatform(t *testing.T) {
+func TestPrepareSafeSubpathDarwin(t *testing.T) {
 	sp := New(nil)
 	if _, _, err := sp.PrepareSafeSubpath(Subpath{}); err == nil {
 		t.Fatal("PrepareSafeSubpath() returned nil error")

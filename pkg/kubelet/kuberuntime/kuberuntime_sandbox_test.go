@@ -45,6 +45,9 @@ func TestGeneratePodSandboxConfig(t *testing.T) {
 	_, _, m, err := createTestRuntimeManager(tCtx)
 	require.NoError(t, err)
 	pod := newTestPod()
+	if runtime.GOOS == "darwin" {
+		pod.Spec.Containers[0].Ports = nil
+	}
 
 	expectedLogDirectory := filepath.Join(testPodLogsDirectory, pod.Namespace+"_"+pod.Name+"_12345678")
 	expectedLabels := map[string]string{
@@ -62,6 +65,9 @@ func TestGeneratePodSandboxConfig(t *testing.T) {
 		{
 			HostPort: 8080,
 		},
+	}
+	if runtime.GOOS == "darwin" {
+		expectedPortMappings = nil
 	}
 
 	podSandboxConfig, err := m.generatePodSandboxConfig(tCtx, pod, 1)
@@ -84,6 +90,9 @@ func TestCreatePodSandbox(t *testing.T) {
 	fakeRuntime, _, m, err := createTestRuntimeManager(tCtx)
 	require.NoError(t, err)
 	pod := newTestPod()
+	if runtime.GOOS == "darwin" {
+		pod.Spec.Containers[0].Ports = nil
+	}
 
 	fakeOS := m.osInterface.(*containertest.FakeOS)
 	fakeOS.MkdirAllFn = func(path string, perm os.FileMode) error {
@@ -169,6 +178,9 @@ func TestCreatePodSandbox_RuntimeClass(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fakeRuntime.Called = []string{}
 			pod := newTestPod()
+			if runtime.GOOS == "darwin" {
+				pod.Spec.Containers[0].Ports = nil
+			}
 			pod.Spec.RuntimeClassName = test.rcn
 
 			id, _, err := m.createPodSandbox(tCtx, pod, 1)

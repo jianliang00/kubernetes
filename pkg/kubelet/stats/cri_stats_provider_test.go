@@ -353,9 +353,8 @@ func TestCRIListPodStats(t *testing.T) {
 func TestListPodStatsStrictlyFromCRI(t *testing.T) {
 	logger, tCtx := ktesting.NewTestContext(t)
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.KubeletPSI, true)
-	if runtime.GOOS == "windows" {
-		// TODO: remove skip once the failing test has been fixed.
-		t.Skip("Skip failing test on Windows.")
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux cgroup paths and filesystem semantics")
 	}
 	var (
 		imageFsMountpoint = "/test/mount/point"

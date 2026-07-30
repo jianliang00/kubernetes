@@ -1,5 +1,4 @@
 //go:build darwin && !cgo
-// +build darwin,!cgo
 
 /*
 Copyright 2026 The Kubernetes Authors.
@@ -19,10 +18,18 @@ limitations under the License.
 
 package cadvisor
 
-import "errors"
+import (
+	"errors"
+
+	"k8s.io/klog/v2"
+)
 
 // New returns a deterministic build-time configuration error when Darwin is
 // built without cgo. The real Darwin implementation uses Mach host APIs.
-func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupsRoots []string, usingLegacyStats, localStorageCapacityIsolation bool) (Interface, error) {
+func New(_ klog.Logger, _ ImageFsInfoProvider, _ string, _ []string, _, _ bool) (Interface, error) {
 	return nil, errors.New("darwin cAdvisor requires CGO_ENABLED=1 to read Mach host statistics")
+}
+
+func IsPsiEnabled(_ klog.Logger) bool {
+	return false
 }
