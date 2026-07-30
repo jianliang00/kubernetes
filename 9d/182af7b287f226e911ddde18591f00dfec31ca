@@ -1,0 +1,21 @@
+.github/workflows/release-darwin-kubelet.yml
+  s_51a068cf631696::t_323eddc5d5eaf1 81,90-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9d182af7b287f226e911ddde18591f00dfec31ca",
+  "prompts": {},
+  "sessions": {
+    "s_51a068cf631696": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb1fd-008b-7432-aae0-08246054f8a4",
+        "model": "unknown"
+      },
+      "human_author": "jianliang00 <wangjianliang0@126.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
