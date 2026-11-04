@@ -203,9 +203,9 @@ func (m *kubeGenericRuntimeManager) applyPlatformSpecificContainerConfig(_ conte
 
 // generateContainerResources returns an explicit empty resource update for macOS.
 //
-// CRI has only Linux and Windows resource fields. The macOS CRI shim
-// treats UpdateContainerResources as a deterministic no-op, so kubelet must send
-// a non-nil but platform-empty resource object instead of failing locally.
+// CRI has only Linux and Windows resource fields. The macOS runtime rejects
+// this request with a recreate-required error instead of reporting an in-place
+// resize as successful. VM capacity is set by RunPodSandbox annotations.
 func (m *kubeGenericRuntimeManager) generateContainerResources(_ context.Context, pod *v1.Pod, container *v1.Container) *runtimeapi.ContainerResources {
 	return &runtimeapi.ContainerResources{}
 }

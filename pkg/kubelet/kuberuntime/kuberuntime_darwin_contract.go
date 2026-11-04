@@ -21,5 +21,6 @@ const (
 	darwinCRIPodSandboxConfigVersionAnnotation = "io.kubernetes.cri.macos/pod-sandbox-config-version"
 	darwinCRIContainerConfigVersionAnnotation  = "io.kubernetes.cri.macos/container-config-version"
 	darwinCRIConfigVersion                     = "v1alpha1"
+	darwinCRIPodSandboxConfigVersion           = "v1alpha2"
 	darwinCRIPlatform                          = "darwin"
 )

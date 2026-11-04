@@ -80,7 +80,7 @@ func TestGeneratePodSandboxConfig(t *testing.T) {
 		assert.Nil(t, podSandboxConfig.Linux)
 		assert.Nil(t, podSandboxConfig.Windows)
 		assert.Equal(t, darwinCRIPlatform, podSandboxConfig.Annotations[darwinCRIPlatformAnnotation])
-		assert.Equal(t, darwinCRIConfigVersion, podSandboxConfig.Annotations[darwinCRIPodSandboxConfigVersionAnnotation])
+		assert.Equal(t, darwinCRIPodSandboxConfigVersion, podSandboxConfig.Annotations[darwinCRIPodSandboxConfigVersionAnnotation])
 	}
 }
 

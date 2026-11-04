@@ -33,6 +33,5 @@ func (m *kubeGenericRuntimeManager) applySandboxResources(_ context.Context, pod
 		config.Annotations = map[string]string{}
 	}
 	config.Annotations[darwinCRIPlatformAnnotation] = darwinCRIPlatform
-	config.Annotations[darwinCRIPodSandboxConfigVersionAnnotation] = darwinCRIConfigVersion
-	return nil
+	return applyDarwinSandboxResources(pod, config)
 }
