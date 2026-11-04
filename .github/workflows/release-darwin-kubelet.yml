@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "GitHub Release tag to create or update"
+        description: "New GitHub Release tag to publish"
         required: true
         type: string
       artifact_version:
@@ -12,12 +12,12 @@ on:
         required: false
         type: string
       draft:
-        description: "Create the release as a draft when it does not exist"
+        description: "Create the release as a draft"
         required: false
         default: false
         type: boolean
       prerelease:
-        description: "Mark the release as a prerelease when it does not exist"
+        description: "Mark the release as a prerelease"
         required: false
         default: false
         type: boolean
@@ -164,33 +164,45 @@ jobs:
           tar -C dist/root -czf "dist/${artifact_name}.tar.gz" .
           shasum -a 256 "dist/${artifact_name}.tar.gz" > "dist/${artifact_name}.tar.gz.sha256"
 
-      - name: Create or update GitHub Release
+      - name: Publish immutable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GIT_COMMIT: ${{ steps.meta.outputs.git_commit }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          ARTIFACT_NAME: ${{ steps.meta.outputs.artifact_name }}
+          RELEASE_DRAFT: ${{ steps.meta.outputs.draft }}
+          RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         shell: bash
         run: |
           set -euo pipefail
 
-          release_tag="${{ steps.meta.outputs.release_tag }}"
-          artifact_name="${{ steps.meta.outputs.artifact_name }}"
-
-          if ! gh release view "${release_tag}" >/dev/null 2>&1; then
-            release_create_args=(
-              gh release create "${release_tag}"
-              --title "${release_tag}"
-              --notes "Darwin arm64 kubelet for Kubernetes v1.27.2."
-            )
-            if [[ "${{ steps.meta.outputs.draft }}" == "true" ]]; then
-              release_create_args+=(--draft)
-            fi
-            if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
-              release_create_args+=(--prerelease)
-            fi
-
-            "${release_create_args[@]}"
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "release ${RELEASE_TAG} already exists; publish a new version instead" >&2
+            exit 1
           fi
 
-          gh release upload "${release_tag}" \
-            "dist/${artifact_name}.tar.gz" \
-            "dist/${artifact_name}.tar.gz.sha256" \
-            --clobber
+          remote_tags="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}")"
+          if [[ -n "${remote_tags}" ]]; then
+            tag_commit="$(printf '%s\n' "${remote_tags}" | awk 'NR == 1 { commit = $1 } /\^\{\}$/ { commit = $1 } END { print commit }')"
+            if [[ "${tag_commit}" != "${GIT_COMMIT}" ]]; then
+              echo "release tag ${RELEASE_TAG} points to ${tag_commit}, expected ${GIT_COMMIT}" >&2
+              exit 1
+            fi
+          fi
+
+          release_create_args=(
+            gh release create "${RELEASE_TAG}"
+            --target "${GIT_COMMIT}"
+            --title "${RELEASE_TAG}"
+            --notes "Darwin arm64 kubelet for Kubernetes v1.27.2."
+          )
+          if [[ "${RELEASE_DRAFT}" == "true" ]]; then
+            release_create_args+=(--draft)
+          fi
+          if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+            release_create_args+=(--prerelease)
+          fi
+          "${release_create_args[@]}"
+          gh release upload "${RELEASE_TAG}" \
+            "dist/${ARTIFACT_NAME}.tar.gz" \
+            "dist/${ARTIFACT_NAME}.tar.gz.sha256"
