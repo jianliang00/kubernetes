@@ -22,6 +22,7 @@ package cadvisor
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	cadvisorapiv2 "github.com/google/cadvisor/info/v2"
@@ -69,5 +70,50 @@ func TestDarwinRejectsNonRootContainerStats(t *testing.T) {
 	_, err = cadvisor.ContainerInfoV2("/kubepods/pod123/container", cadvisorapiv2.RequestOptions{Count: 1})
 	if !errors.Is(err, errDarwinNonRootContainer) {
 		t.Fatalf("ContainerInfoV2(non-root) error = %v, want %v", err, errDarwinNonRootContainer)
+	}
+}
+
+func TestDarwinMachineInfoUsesPlatformUUID(t *testing.T) {
+	cadvisor, err := New(nil, os.TempDir(), nil, false, false)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	info, err := cadvisor.MachineInfo()
+	if err != nil {
+		t.Fatalf("MachineInfo() error = %v", err)
+	}
+	want := strings.ToLower(strings.TrimSpace(darwinPlatformUUID()))
+	if want == "" {
+		t.Fatal("IOPlatformUUID was unavailable on the test host")
+	}
+	if info.MachineID != want || info.SystemUUID != want {
+		t.Fatalf("MachineInfo() identities = (%q, %q), want platform UUID %q", info.MachineID, info.SystemUUID, want)
+	}
+}
+
+func TestDarwinMachineIdentifiers(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		uuid       string
+		serial     string
+		machineID  string
+		systemUUID string
+	}{
+		{
+			name:       "platform UUID takes precedence over serial",
+			uuid:       " 5EE786B0-D581-573D-8FA4-6F5132A2FF6D ",
+			serial:     "SERIAL",
+			machineID:  "5ee786b0-d581-573d-8fa4-6f5132a2ff6d",
+			systemUUID: "5ee786b0-d581-573d-8fa4-6f5132a2ff6d",
+		},
+		{name: "serial is only a machine ID fallback", serial: " F9PX1F4KX4 ", machineID: "f9px1f4kx4"},
+		{name: "unavailable identities remain empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			machineID, systemUUID := darwinMachineIdentifiers(test.uuid, test.serial)
+			if machineID != test.machineID || systemUUID != test.systemUUID {
+				t.Fatalf("darwinMachineIdentifiers() = (%q, %q), want (%q, %q)", machineID, systemUUID, test.machineID, test.systemUUID)
+			}
+		})
 	}
 }
