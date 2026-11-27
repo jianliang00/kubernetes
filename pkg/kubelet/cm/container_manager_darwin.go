@@ -21,6 +21,7 @@ package cm
 
 import (
 	"fmt"
+	"sync"
 
 	"k8s.io/mount-utils"
 
@@ -37,6 +38,7 @@ import (
 type darwinContainerManager struct {
 	containerManagerStub
 	cadvisorInterface cadvisor.Interface
+	capacityMutex     sync.RWMutex
 	capacity          v1.ResourceList
 }
 
@@ -55,7 +57,10 @@ func (cm *darwinContainerManager) Start(
 		if err != nil {
 			return fmt.Errorf("failed to get rootfs info: %v", err)
 		}
-		cm.capacity = cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
+		capacity := cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
+		cm.capacityMutex.Lock()
+		cm.capacity = capacity
+		cm.capacityMutex.Unlock()
 	}
 	return cm.containerManagerStub.Start(node, activePods, sourcesReady, podStatusProvider, runtimeService, localStorageCapacityIsolation)
 }
@@ -64,16 +69,19 @@ func (cm *darwinContainerManager) GetCapacity(localStorageCapacityIsolation bool
 	if !localStorageCapacityIsolation {
 		return v1.ResourceList{}
 	}
-	if _, ok := cm.capacity[v1.ResourceEphemeralStorage]; ok {
-		return cm.capacity
+	cm.capacityMutex.RLock()
+	capacity := cm.capacity
+	cm.capacityMutex.RUnlock()
+	if _, ok := capacity[v1.ResourceEphemeralStorage]; ok {
+		return capacity
 	}
 	if cm.cadvisorInterface == nil {
-		return cm.capacity
+		return capacity
 	}
 	rootfs, err := cm.cadvisorInterface.RootFsInfo()
 	if err != nil {
 		klog.ErrorS(err, "Unable to get rootfs data from cAdvisor interface")
-		return cm.capacity
+		return capacity
 	}
 	return cadvisor.EphemeralStorageCapacityFromFsInfo(rootfs)
 }

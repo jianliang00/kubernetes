@@ -68,3 +68,26 @@ func TestDarwinContainerManagerGetCapacityFallsBackToRootFsInfo(t *testing.T) {
 	ephemeralStorage := capacity[v1.ResourceEphemeralStorage]
 	require.Equal(t, int64(rootfsCapacity), ephemeralStorage.Value())
 }
+
+func TestDarwinContainerManagerConcurrentStartAndCapacity(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	const rootfsCapacity = 560869621760
+	mockCadvisor := cadvisortest.NewMockInterface(ctrl)
+	mockCadvisor.EXPECT().RootFsInfo().Return(cadvisorapiv2.FsInfo{Capacity: rootfsCapacity}, nil).AnyTimes()
+	manager := &darwinContainerManager{
+		cadvisorInterface: mockCadvisor,
+		capacity:          v1.ResourceList{},
+	}
+	started := make(chan error, 1)
+	go func() {
+		started <- manager.Start(&v1.Node{}, nil, nil, nil, nil, true)
+	}()
+	for i := 0; i < 100; i++ {
+		capacity := manager.GetCapacity(true)
+		ephemeralStorage := capacity[v1.ResourceEphemeralStorage]
+		require.Equal(t, int64(rootfsCapacity), ephemeralStorage.Value())
+	}
+	require.NoError(t, <-started)
+}
