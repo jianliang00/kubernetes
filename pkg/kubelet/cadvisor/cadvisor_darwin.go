@@ -21,6 +21,9 @@ package cadvisor
 
 /*
 #cgo CFLAGS: -Wno-deprecated-declarations
+#cgo LDFLAGS: -framework CoreFoundation -framework IOKit
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <mach/processor_info.h>
@@ -115,6 +118,44 @@ static uint64_t darwin_get_swap_used_bytes(void) {
 static uint64_t darwin_page_size(void) {
 	return (uint64_t)getpagesize();
 }
+
+static char *darwin_copy_platform_string(CFStringRef key) {
+	io_registry_entry_t platform = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"));
+	if (platform == MACH_PORT_NULL) {
+		return NULL;
+	}
+
+	CFTypeRef value = IORegistryEntryCreateCFProperty(platform, key, kCFAllocatorDefault, 0);
+	IOObjectRelease(platform);
+	if (value == NULL || CFGetTypeID(value) != CFStringGetTypeID()) {
+		if (value != NULL) {
+			CFRelease(value);
+		}
+		return NULL;
+	}
+
+	CFStringRef string = (CFStringRef)value;
+	CFIndex size = CFStringGetMaximumSizeForEncoding(CFStringGetLength(string), kCFStringEncodingUTF8) + 1;
+	if (size <= 0) {
+		CFRelease(value);
+		return NULL;
+	}
+	char *result = calloc((size_t)size, sizeof(char));
+	if (result == NULL || !CFStringGetCString(string, result, size, kCFStringEncodingUTF8)) {
+		free(result);
+		result = NULL;
+	}
+	CFRelease(value);
+	return result;
+}
+
+static char *darwin_copy_platform_uuid(void) {
+	return darwin_copy_platform_string(CFSTR("IOPlatformUUID"));
+}
+
+static char *darwin_copy_platform_serial_number(void) {
+	return darwin_copy_platform_string(CFSTR("IOPlatformSerialNumber"));
+}
 */
 import "C"
 
@@ -122,6 +163,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -431,6 +473,7 @@ func darwinMachineInfo(bootTime time.Time) *cadvisorapi.MachineInfo {
 			Cores:  darwinCores(numCPU),
 		},
 	}
+	machineID, systemUUID := darwinMachineIdentifiers(darwinPlatformUUID(), darwinPlatformSerialNumber())
 	return &cadvisorapi.MachineInfo{
 		Timestamp:        time.Now(),
 		CPUVendorID:      darwinSysctlString("machdep.cpu.brand_string", darwinSysctlString("machdep.cpu.vendor", "apple")),
@@ -438,14 +481,40 @@ func darwinMachineInfo(bootTime time.Time) *cadvisorapi.MachineInfo {
 		NumPhysicalCores: numCPU,
 		NumSockets:       1,
 		MemoryCapacity:   memoryCapacity,
-		MachineID:        darwinSysctlString("hw.model", "darwin"),
-		SystemUUID:       darwinSysctlString("kern.hostuuid", darwinSysctlString("hw.model", "darwin")),
+		MachineID:        machineID,
+		SystemUUID:       systemUUID,
 		BootID:           fmt.Sprintf("%d", bootTime.UnixNano()),
 		Topology:         topology,
 		CloudProvider:    cadvisorapi.UnknownProvider,
 		InstanceType:     cadvisorapi.UnknownInstance,
 		InstanceID:       cadvisorapi.UnNamedInstance,
 	}
+}
+
+func darwinMachineIdentifiers(platformUUID, serialNumber string) (machineID, systemUUID string) {
+	platformUUID = strings.ToLower(strings.TrimSpace(platformUUID))
+	if platformUUID != "" {
+		return platformUUID, platformUUID
+	}
+	return strings.ToLower(strings.TrimSpace(serialNumber)), ""
+}
+
+func darwinPlatformUUID() string {
+	value := C.darwin_copy_platform_uuid()
+	if value == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+func darwinPlatformSerialNumber() string {
+	value := C.darwin_copy_platform_serial_number()
+	if value == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
 }
 
 func darwinCores(numCPU int) []cadvisorapi.Core {

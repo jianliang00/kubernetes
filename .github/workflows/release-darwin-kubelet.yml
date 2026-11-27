@@ -103,6 +103,7 @@ jobs:
             ./cmd/kubelet \
             ./pkg/kubelet \
             ./pkg/kubelet/cadvisor \
+            ./pkg/kubelet/cm \
             ./pkg/kubelet/kuberuntime
 
       - name: Build kubelet
