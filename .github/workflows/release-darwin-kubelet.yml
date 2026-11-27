@@ -31,9 +31,9 @@ permissions:
 jobs:
   build-release:
     name: Build and publish darwin/arm64 kubelet
-    # GitHub's macos-14 hosted runner is arm64, which keeps the cgo-backed
+    # GitHub's macos-15 hosted runner is arm64, which keeps the cgo-backed
     # Darwin stats path native and avoids cross-compiling Mach calls.
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Check out source
